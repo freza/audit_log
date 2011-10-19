@@ -31,6 +31,7 @@
 -export([change_file/1, clean_old/1, rediscover_logs/0]).
 
 -import(audit_log_lib, [apply_pid/2, do_set_config/2]).
+-import(io_lib, [format/2]).
 -import(lists, [foreach/2, keysort/2, map/2]).
 
 -include("audit_log_db.hrl").
@@ -40,14 +41,14 @@
 syslog_msg(Msg) ->
     audit_msg(syslog, Msg).
 
-syslog_msg(Msg, Timeout) ->
-    audit_msg(syslog, Msg, Timeout).
+syslog_msg(Fmt, Args) ->
+    audit_msg(syslog, Fmt, Args).
 
 audit_msg(Log, Msg) ->
     apply_pid(Log, fun (Pid) -> audit_log_disk:send_msg(Pid, Msg) end).
 
-audit_msg(Log, Msg, Timeout) ->
-    apply_pid(Log, fun (Pid) -> audit_log_disk:send_msg(Pid, Msg, Timeout) end).
+audit_msg(Log, Fmt, Args) ->
+    apply_pid(Log, fun (Pid) -> audit_log_disk:send_msg(Pid, format(Fmt, Args)) end).
 
 %%% Management API.
 

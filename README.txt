@@ -1,7 +1,13 @@
+History:
+
+  2005-2010 Chandrashekhar Mullaparthi
+  2010-2011 Jachym Holecek
+
 Functions:
 
   audit_log:syslog_msg(Fmt, Args)     -> ok.
   audit_log:syslog_msg(iodata())      -> ok.
+
   audit_log:audit_msg(Log, Fmt, Args) -> ok.
   audit_log:audit_msg(Log, iodata())  -> ok.
 

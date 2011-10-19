@@ -45,9 +45,6 @@ start_link(Log) ->
 send_msg(Pid, Msg) ->
     gen_server:call(Pid, {send_msg, Msg}).
 
-send_msg(Pid, Msg, Timeout) ->
-    gen_server:call(Pid, {send_msg, Msg}, Timeout).
-
 set_options(Pid) ->
     gen_server:call(Pid, set_options).
 

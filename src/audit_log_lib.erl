@@ -119,7 +119,7 @@ do_set_config(Log, Opts) ->
 
 default_opts() ->
     [{cache_size, 128}, {cache_time, 1000}, {size_limit, 200000}, {time_limit, 24}, {lifetime, 7},
-     {suffix, ".audit"}, {dir, default_dir()}].
+     {dir, default_dir()}].
 
 default_dir() ->
     get_env(audit_log, default_dir, filename:join([code:root_dir(), "audit_logs"])).
