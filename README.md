@@ -1,8 +1,17 @@
-# `audit_log`
+# audit_log
 
 ## Purpose
 
 Lightweight audit logging library.
+
+## Features
+
+* Logfile size limit.
+* Logfile age limit.
+* Logfile name embeds creation timestamp.
+* Automatic cleanup of old logfiles.
+* Synchronous interface.
+* Log contents treated as opaque data.
 
 ## History
 
