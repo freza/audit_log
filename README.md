@@ -68,5 +68,5 @@ audit_log:get_status(Log)           -> Stat.
 
 ## Application environment
 
-* `application:set_env(audit_log, default_dir, Dir).`
+* `application:set_env(audit_log, default_dir, Dir).` 
   Default target directory for new logs, defaults to "$ROOT/audit_logs/".
