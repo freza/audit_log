@@ -1,0 +1,7 @@
+{application, audit_log,
+    [{description, "Lightweight Audit Logging Application"},
+     {vsn, "2.5.0"},
+     {registered, [audit_log_ctrl, audit_log_disk_sup]},
+     {mod, {audit_log_app, []}},
+     {applications, [kernel, stdlib, mnesia]}
+    ]}.

@@ -69,11 +69,11 @@ async_send_msg(Pid, Msg) ->
 	  acc_size, 		%% Lines written so far. 		:: line_count()
 	  change_tmr, 		%% File change timer. 			:: timer_ref()
 	  change_ref, 		%% File change timer token. 		:: reference()
-	  clean_tmr, 		%% Old file cleanup timer. 		::  timer_ref()
+	  clean_tmr, 		%% Old file cleanup timer. 		:: timer_ref()
 	  clean_ref, 		%% Old file cleanup timer token. 	:: reference()
 	  dir, 			%% Destination directory. 		:: filename()
 	  size_limit, 		%% Change after N entries. 		:: line_count() | infinity
-	  time_limit, 		%% Change after N hours. 		::  hours()
+	  time_limit, 		%% Change after N hours. 		:: hours()
 	  lifetime, 		%% Remove old logs after N days. 	:: days()
 	  cache_size, 		%% Write buffer size. 			:: kilobytes()
 	  cache_time 		%% Write buffer timeout. 		:: msec()
