@@ -4,19 +4,20 @@
 
 Lightweight audit logging library.
 
-## Features
-
-* Logfile size limit.
-* Logfile age limit.
-* Logfile name embeds creation timestamp.
-* Automatic cleanup of old logfiles.
-* Synchronous interface.
-* Log contents treated as opaque data.
-
 ## History
 
 * 2005-2010 Chandrashekhar Mullaparthi
 * 2010-2011 Jachym Holecek
+
+## Features
+
+* Persistent logs (automatically opened on startup).
+* Log messages treated as opaque data.
+* Synchronous interface.
+* Good throughput.
+* Automatic file change when size or age limit reached.
+* Automatic cleanup of old logfiles.
+* Logfile name embeds creation timestamp.
 
 ## Public interface
 
