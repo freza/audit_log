@@ -30,10 +30,7 @@
 -export([make_three/1, make_two/1]).
 -export([secs_to_midnight/0, secs_to_midnight/1]).
 -export([printable_date/0, printable_date/1]).
--export([do_set_config/2, apply_pid/2, event_log/2]).
 -export([get_env/3]).
-
--import(lists, []).
 
 -include("audit_log_db.hrl").
 
@@ -81,56 +78,10 @@ printable_date({_, _, MicroSecs} = Now) ->
 printable_date({{Y, Mo, D}, {H, M, S}}) ->
     [integer_to_list(Y), $-, make_two(Mo), $-, make_two(D), $_, make_two(H), $:, make_two(M), $:, make_two(S)].
 
-%%%
-
-event_log(Fmt, Args) ->
-    case get_env(audit_log, event_log, true) of
-	true ->
-	    Msg = [printable_date(), ",", io_lib:format(Fmt, Args)],
-	    try
-		apply_pid(audit_log, fun (Pid) -> audit_log_disk:async_send_msg(Pid, Msg) end)
-	    catch
-		exit : {log_missing, audit_log} ->
-		    ok
-	    end;
-	_ ->
-	    ok
-    end.
-
-apply_pid(Log, Fun) ->
-    case ets:lookup(audit_log_ctrl, Log) of
-	[{_, Pid}] when is_pid(Pid) ->
-	    Fun(Pid);
-	_ ->
-	    exit({log_missing, Log})
-    end.
-
-do_set_config(Log, Opts) ->
-    case mnesia:read(audit_log_conf, Log) of
-	[#audit_log_conf{opts = Prev} = CF] ->
-	    mnesia:write(CF#audit_log_conf{log = Log, opts = Os = merge_opts(Opts, Prev)}),
-	    Os;
-	[] ->
-	    mnesia:write(#audit_log_conf{log = Log, opts = Os = merge_opts(Opts, default_opts())}),
-	    Os
-    end.
-
-%%%
-
-default_opts() ->
-    [{cache_size, 128}, {cache_time, 1000}, {size_limit, 200000}, {time_limit, 24}, {lifetime, 7},
-     {dir, default_dir()}].
-
-default_dir() ->
-    get_env(audit_log, default_dir, filename:join([code:root_dir(), "audit_logs"])).
-
 get_env(App, Key, Def) ->
     case application:get_env(App, Key) of
-        undefined ->
-            Def;
-        Val ->
-            Val
+        {ok, Val} ->
+            Val;
+	undefined ->
+            Def
     end.
-
-merge_opts(NL, OL) ->
-    orddict:merge(fun (_, NV, _) -> NV end, orddict:from_list(NL), orddict:from_list(OL)).

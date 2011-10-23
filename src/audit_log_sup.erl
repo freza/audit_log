@@ -24,24 +24,30 @@
 %%% SUCH DAMAGE.
 
 -module(audit_log_sup).
--vsn(' $Id: audit_log_sup.erl 20123 2011-07-08 17:19:04Z jachym $ ').
+-vsn(' $Id: audit_log_disk_sup.erl 20123 2011-07-08 17:19:04Z jachym $ ').
 -behaviour(supervisor).
 
--export([start_link/0]).
+-export([start_link/0, add_worker/1, del_worker/1]).
 -export([init/1]).
 
 %%% Public interface.
 
 start_link() ->
-    supervisor:start_link(?MODULE, []).
+    supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
-%%% Supervisor.
+add_worker(Log) ->
+    supervisor:start_child(?MODULE, child(Log)).
+
+del_worker(Log) ->
+    supervisor:terminate_child(?MODULE, Log),
+    supervisor:delete_child(?MODULE, Log).
+
+%%% Supervisor callbacks.
 
 init([]) ->
-    {ok, {{rest_for_one, 1, 5}, children()}}.
+    {ok, {{one_for_one, 10, 5000}, [child(Log) || Log <- mnesia:dirty_all_keys(audit_log_conf)]}}.
 
 %%% Implementation.
 
-children() ->
-    [{audit_log_ctrl, {audit_log_ctrl, start_link, []}, transient, 60000, worker, [audit_log_ctrl]},
-     {audit_log_disk_sup, {audit_log_disk_sup, start_link, []}, transient, 120000, supervisor, [audit_log_disk_sup]}].
+child(Log) ->
+    {Log, {audit_log_disk, start_link, [Log]}, transient, 60000, worker, [audit_log_disk]}.

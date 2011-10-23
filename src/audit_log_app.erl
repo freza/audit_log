@@ -29,17 +29,33 @@
 
 -export([start/2, stop/1]).
 
+-import(lists, [member/2]).
+
+-include("audit_log_db.hrl").
+
 %%% Application.
 
 start(normal, _) ->
-    ok = mnesia:wait_for_tables([audit_log_conf], 5000),
-    case audit_log_sup:start_link() of
-	{ok, _} = Res ->
-	    ok = audit_log_ctrl:rediscover_logs(),
-	    Res;
-	Err ->
-	    Err
-    end.
+    setup_db(),
+    {ok, _} = audit_log:open_log(syslog),
+    audit_log_sup:start_link().
 
 stop(_) ->
     ok.
+
+%%% Implementation.
+
+setup_db() ->
+    try mnesia:table_info(audit_log_conf, disc_copies) of
+	Nodes ->
+	    case member(node(), Nodes) of
+		false ->
+		    {atomic, ok} = mnesia:add_table_copy(audit_log_conf, node(), disc_copies);
+		_ ->
+		    ok
+	    end
+    catch
+	exit : {aborted, {no_exists, _, _}} ->
+	    {atomic, ok} = audit_log:create_db()
+    end,
+    ok = mnesia:wait_for_tables([audit_log_conf], 10000).

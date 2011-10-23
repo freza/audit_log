@@ -29,10 +29,10 @@
 -export([open_log/1, open_log/2, audit_msg/2, audit_msg/3, syslog_msg/1, syslog_msg/2, close_log/1]).
 -export([get_config/0, get_config/1, set_config/1, set_config/2, get_status/0, get_status/1]).
 -export([change_file/1, clean_old/1, rediscover_logs/0]).
+-export([create_db/0, create_db/1]).
 
--import(audit_log_lib, [apply_pid/2, do_set_config/2]).
--import(io_lib, [format/2]).
--import(lists, [foreach/2, keysort/2, map/2]).
+-import(audit_log_lib, [get_env/3]).
+-import(lists, [foreach/2, keysort/2]).
 
 -include("audit_log_db.hrl").
 
@@ -45,10 +45,10 @@ syslog_msg(Fmt, Args) ->
     audit_msg(syslog, Fmt, Args).
 
 audit_msg(Log, Msg) ->
-    apply_pid(Log, fun (Pid) -> audit_log_disk:send_msg(Pid, Msg) end).
+    audit_log_disk:send_msg(Log, Msg).
 
 audit_msg(Log, Fmt, Args) ->
-    apply_pid(Log, fun (Pid) -> audit_log_disk:send_msg(Pid, format(Fmt, Args)) end).
+    audit_log_disk:send_msg(Log, io_lib:format(Fmt, Args)).
 
 %%% Management API.
 
@@ -56,25 +56,41 @@ open_log(Log) ->
     open_log(Log, []).
 
 open_log(Log, Opts) ->
-    audit_log_ctrl:open_log(Log, Opts).
+    mnesia:activity(transaction, fun () -> do_set_config(Log, Opts) end),
+    try audit_log_sup:add_worker(Log) of
+	{ok, _} ->
+	    {ok, started};
+	{error, {already_started, _}} ->
+	    {ok, running};
+	{error, _} = Err ->
+	    Err
+    catch
+	exit : {noproc, _} ->
+	    {ok, added}
+    end.
 
 close_log(Log) ->
-    audit_log_ctrl:close_log(Log).
+    try audit_log_sup:del_worker(Log) catch
+	exit : {noproc, _} ->
+	    ok
+    end,
+    mnesia:activity(transaction, fun () -> mnesia:delete(audit_log_conf, Log, write) end).
 
 change_file(Log) ->
-    apply_pid(Log, fun audit_log_disk:change_file/1).
+    audit_log_disk:change_file(Log).
 
 clean_old(Log) ->
-    apply_pid(Log, fun audit_log_disk:clean_old/1).
+    audit_log_disk:clean_old(Log).
 
 rediscover_logs() ->
-    audit_log_ctrl:rediscover_logs().
+    %% This is provided just for peace of mind but isn't really believed to be useful.
+    [{Log, open_log(Log)} || Log <- mnesia:dirty_all_keys(audit_log_conf)].
 
 %%% Maintenance API.
 
 get_config() ->
     Read = fun () ->
-		   map(fun (Log) -> {Log, do_get_config(Log)} end, mnesia:all_keys(audit_log_conf))
+		   [{Log, do_get_config(Log)} || Log <- mnesia:all_keys(audit_log_conf)]
 	   end,
     keysort(1, mnesia:activity(transaction, Read)).
 
@@ -82,35 +98,59 @@ get_config(Log) ->
     mnesia:activity(transaction, fun () -> do_get_config(Log) end).
 
 set_config(Opts) ->
-    %% This could benefit from issuing update concurrently, but OTOH nobody cares.
     Edit = fun () ->
 		   foreach(fun (Log) -> do_set_config(Log, Opts) end, All = mnesia:all_keys(audit_log_conf)),
 		   All
 	   end,
-    foreach(fun (Log) -> catch apply_pid(Log, fun audit_log_disk:set_options/1) end, mnesia:activity(transaction, Edit)).
+    [(catch audit_log_disk:set_options(Log)) || Log <- mnesia:activity(transaction, Edit)],
+    ok.
 
 set_config(Log, Opts) ->
     mnesia:activity(transaction, fun () -> do_set_config(Log, Opts) end),
-    apply_pid(Log, fun audit_log_disk:set_options/1).
+    audit_log_disk:set_options(Log).
 
 get_status() ->
-    keysort(1, map(fun (Log) -> do_get_status(Log) end, mnesia:dirty_all_keys(audit_log_conf))).
+    keysort(1, [{Log, get_status(Log)} || Log <-  mnesia:dirty_all_keys(audit_log_conf)]).
 
 get_status(Log) ->
-    apply_pid(Log, fun (Pid) -> audit_log_disk:get_status(Pid) end).
+    try
+	audit_log_disk:get_status(Log)
+    catch
+	exit : {noproc, _} ->
+	    down
+    end.
+
+%%% System API. Normally not needed, but allow creating configuration table manually.
+
+create_db() ->
+    create_db([{disc_copies, [node()]}, {local_content, true}]).
+
+create_db(Opts) ->
+    mnesia:create_table(audit_log_conf, [{attributes, record_info(fields, audit_log_conf)},
+					 {type, set} | Opts]).
 
 %%% Utilities.
-
-do_get_status(Log) ->
-    try
-	{Log, apply_pid(Log, fun (Pid) -> audit_log_disk:get_status(Pid) end)}
-    catch
-	exit : {log_missing, _} ->
-	    {Log, {not_started, nil, nil}};
-	exit : {noproc, _} ->
-	    {Log, {not_available, nil, nil}}
-    end.
 
 do_get_config(Log) ->
     [#audit_log_conf{opts = Opts}] = mnesia:read(audit_log_conf, Log),
     Opts.
+
+do_set_config(Log, Opts) ->
+    case mnesia:read(audit_log_conf, Log) of
+	[#audit_log_conf{opts = Prev} = CF] ->
+	    mnesia:write(CF#audit_log_conf{log = Log, opts = Os = merge_opts(Opts, Prev)}),
+	    Os;
+	[] ->
+	    mnesia:write(#audit_log_conf{log = Log, opts = Os = merge_opts(Opts, default_opts())}),
+	    Os
+    end.
+
+default_opts() ->
+    [{cache_size, 128}, {cache_time, 1000}, {size_limit, 200000}, {time_limit, 24}, {lifetime, 7},
+     {dir, default_dir()}].
+
+default_dir() ->
+    get_env(audit_log, default_dir, filename:join([code:root_dir(), "audit_logs"])).
+
+merge_opts(NL, OL) ->
+    orddict:merge(fun (_, NV, _) -> NV end, orddict:from_list(NL), orddict:from_list(OL)).

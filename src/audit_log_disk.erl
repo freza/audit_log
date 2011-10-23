@@ -31,7 +31,7 @@
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 -export([async_send_msg/2]).
 
--import(audit_log_lib, [event_log/2, get_value/2, get_value/3, make_two/1, secs_to_midnight/0]).
+-import(audit_log_lib, [get_value/3, make_two/1, secs_to_midnight/0]).
 -import(filename, [basename/1, dirname/1, rootname/2, absname/1, join/1, split/1]).
 
 -include("audit_log_db.hrl").
@@ -39,8 +39,8 @@
 %%% Public interface.
 
 start_link(Log) ->
-    %% gen_server:start_link(?MODULE, [Log], [{spawn_opt, [{fullsweep_after, 0}]}]).
-    gen_server:start_link(?MODULE, [Log], []).
+    %% gen_server:start_link({local, Log}, ?MODULE, [Log], [{spawn_opt, [{fullsweep_after, 0}]}]).
+    gen_server:start_link({local, Log}, ?MODULE, [Log], []).
 
 send_msg(Pid, Msg) ->
     gen_server:call(Pid, {send_msg, Msg}).
@@ -87,40 +87,31 @@ init([Log]) ->
 	    State2 = #state{path = Path} = open(State),
 	    proc_lib:spawn_link(fun () -> clean_open(Log, dirname(Path), Path) end),
 	    Timer = schedule_clean_old(Ref = make_ref()),
-	    audit_log_ctrl ! {worker_up, Log, self()},
 	    {ok, State2#state{clean_tmr = Timer, clean_ref = Ref}};
 	_ ->
 	    exit(no_directory)
     end.
 
-handle_call({send_msg, Msg}, _, State0) ->
-    case write(State0, Msg) of
-	#state{acc_size = 0} = State ->
-	    {reply, changed_file, State};
-	State ->
-	    {reply, ok, State}
-    end;
+handle_call({send_msg, Msg}, _, State) ->
+    {reply, ok, write(State, Msg)};
 handle_call(set_options, _, State) ->
-    State2 = case configure(State) of
-		 {StateX, true} ->
-		     change(StateX);
-		 {StateX, _} ->
-		     StateX
-	     end,
+    case configure(State) of
+	{StateX, true} ->
+	    State2 = change(StateX);
+	{StateX, _} ->
+	    State2 = StateX
+    end,
     {reply, ok, State2};
 handle_call(get_status, _, #state{path = Path, acc_size = AS} = State) ->
-    {reply, {online, AS, Path}, State};
+    {reply, {AS, Path}, State};
 handle_call(change_file, _, State) ->
     {reply, ok, change(State)};
 handle_call(clean_old, _, #state{clean_tmr = Timer} = State) ->
     erlang:cancel_timer(Timer),
     {reply, ok, cleanup(State)};
 handle_call(_, _, State) ->
-    {reply, bad_request, State}.
+    {reply, {error, bad_request}, State}.
 
-handle_info({confirm_up, From}, State) ->
-    gen_server:reply(From, ok),
-    {noreply, State};
 handle_info({clean_old, CR}, #state{clean_ref = CR} = State) ->
     {noreply, cleanup(State)};
 handle_info({change, CR}, #state{change_ref = CR} = State) ->
@@ -168,7 +159,6 @@ change(#state{change_tmr = Timer} = State) ->
 open(#state{log = Log, dir = Dir, time_limit = TL, iod = nil, cache_size = CS, cache_time = CT} = S) ->
     {ok, Iod} = file:open(Path = logfile(Log, Dir), cache_opts([raw, write, binary], CS, CT)),
     Timer = schedule_file_change(TL, CR = make_ref()),
-    event_log("~s,open_file,~s.~n", [Log, Path]),
     S#state{iod = Iod, path = Path, change_tmr = Timer, change_ref = CR}.
 
 cache_opts(Opts, CS, CT) when CS == 0; CT == 0 ->
@@ -178,7 +168,7 @@ cache_opts(Opts, CS, CT) ->
 
 close(#state{iod = nil} = State) ->
     State;
-close(#state{log = Log, iod = Iod, path = Path, acc_size = Size} = State) ->
+close(#state{iod = Iod, path = Path, acc_size = Size} = State) ->
     ok = file:close(Iod),
     case Size == 0 of
 	true ->
@@ -198,7 +188,6 @@ close(#state{log = Log, iod = Iod, path = Path, acc_size = Size} = State) ->
 		    exit({rename_file, Err})
 	    end
     end,
-    event_log("~s,close_file,~s.~n", [Log, Path]),
     State#state{iod = nil, path = nil, acc_size = 0}.
 
 clean_open(Log, Dir, Cur) ->
@@ -208,8 +197,12 @@ clean_open(Log, Dir, Cur) ->
 		(_, N) ->
 		    N
 	    end,
-    N = filelib:fold_files(Dir, regexp(Log, ".audit.open"), false, Strip, 0),
-    event_log("~s,clean_open,~w.~n", [Log, N]).
+    case filelib:fold_files(Dir, regexp(Log, ".audit.open"), false, Strip, 0) of
+	0 ->
+	    ok;
+	N ->
+	    error_logger:info_msg("[Audit Log] Cleaned up ~d open files for ~s.", [N, Log])
+    end.
 
 clean_old(Log, Dir, Limit) ->
     LT = erlang:localtime(),
@@ -223,8 +216,12 @@ clean_old(Log, Dir, Limit) ->
 			    N
 		    end
 	    end,
-    N = filelib:fold_files(Dir, regexp(Log, ".audit"), false, Clean, 0),
-    event_log("~s,clean_old,~w.~n", [Log, N]).
+    case filelib:fold_files(Dir, regexp(Log, ".audit"), false, Clean, 0) of
+	0 ->
+	    ok;
+	N ->
+	    error_logger:info_msg("[Audit Log] Cleaned up ~d old files for ~s.", [N, Log])
+    end.
 
 %%% Utilities.
 
