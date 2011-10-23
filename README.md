@@ -146,6 +146,6 @@ $ erl -pa /where/ever/audit_log.git/ebin -boot start_sasl -sname foo -audit_log 
 (foo@bar)2> application:start(mnesia).
 [...]
 (foo@bar)3> application:start(audit_log).
-[... In other terminal run: tail -f /tmp/audit_log/syslog*.open ...]
+[... In other terminal run: tail -f /tmp/audit_logs/syslog*.open ...]
 (foo@bar)4> audit_log:syslog_msg([audit_log_lib:printable_date(), " Hello!", $\n]).
 ```
