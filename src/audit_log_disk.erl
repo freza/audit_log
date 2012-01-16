@@ -268,6 +268,8 @@ mkdir([Dir | Tail], Parent) ->
 	ok ->
 	    ok;
 	{error, eexist} ->
+	    ok;
+	{error, eisdir} ->
 	    ok
     end,
     mkdir(Tail, Path);
