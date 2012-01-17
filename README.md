@@ -179,6 +179,15 @@ audit_log:get_status(Log) -> Stat.
 
 * Return runtime status of all logs, or single selected log.
 
+```erlang
+audit_log:create_db() -> Mnesia_ret.
+audit_log:create_db(Mnesia_opts) -> Mnesia_ret.
+```
+
+* This can be used to manually create configuration table in cases where default
+  table options aren't desirable. Should be called before `audit_log` is first
+  started.
+
 ### Utility API
 
 ```erlang
