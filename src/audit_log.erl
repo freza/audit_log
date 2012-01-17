@@ -1,3 +1,4 @@
+%%% Copyright (c) 2012 Jachym Holecek <freza@circlewave.net>
 %%% Copyright (c) 2005-2011 Everything Everywhere Ltd.
 %%% All rights reserved.
 %%%
@@ -83,7 +84,7 @@ clean_old(Log) ->
     audit_log_disk:clean_old(Log).
 
 rediscover_logs() ->
-    %% This is provided just for peace of mind but isn't really believed to be useful.
+    %% Applications can use this to ensure all logs are usable.
     [{Log, open_log(Log)} || Log <- mnesia:dirty_all_keys(audit_log_conf)].
 
 %%% Maintenance API.
@@ -147,7 +148,7 @@ do_set_config(Log, Opts) ->
 
 default_opts() ->
     [{cache_size, 128}, {cache_time, 1000}, {size_limit, 200000}, {time_limit, 24}, {lifetime, 7},
-     {dir, default_dir()}].
+     {with_node, false}, {suffix, "audit"}, {dir, default_dir()}].
 
 default_dir() ->
     get_env(audit_log, default_dir, filename:join([code:root_dir(), "audit_logs"])).

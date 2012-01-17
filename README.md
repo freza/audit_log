@@ -38,9 +38,75 @@ KB = MS      = integer() >= 0.
 Log          = atom().
 NN = HH = DD = integer() > 0 | infinity.
 Stat         = {Items_written, Cur_file}.
-Opt          = {cache_size, KB} | {cache_time, MS} | {size_limit, NN} | {time_limit, HH} | {lifetime, DD} | {dir, Path}.
-Opts         = [Opt].
+Opts         = [Opt]
+Opt          = {cache_size, KB}
+             | {cache_time, MS}
+	     | {size_limit, NN}
+	     | {time_limit, HH}
+	     | {lifetime, DD}
+	     | {with_node, Flag}
+	     | {suffix, Str}
+	     | {dir, Path}.
 ```
+
+### Log Options
+
+```erlang
+{cache_size, KB}
+```
+
+* Maximum file driver write buffer size, in kilobytes. Flush is forced when this
+  threshold is reached. The value of `0` disables write buffering. Default value
+  is 128KB.
+
+```erlang
+{cache_time, MS}
+```
+
+* File driver write buffer time to live, in milliseconds. Flush is forced when
+  oldest buffered entry exceeds this age. The value of `0` disables write buffering.
+  Default value is 1000ms.
+
+```erlang
+{size_limit, NN}
+```
+
+* Maximum number of entries per log file before file change is forced. Default value
+  is 200k.
+
+```erlang
+{time_limit, HH}
+```
+
+* Maximum age, in hours, of log file before file change is forced. Change time will
+  be aligned to multiples of this setting. Default value is 24h, aligns to midnight.
+
+```erlang
+{lifetime, DD}
+```
+
+* Maximum age, in days, of log file before it's automatically cleaned up. Old files
+  are automatically deleted every midnight, but can be forced manually.
+
+```erlang
+{with_node, Flag}
+```
+
+* Boolean indicating whether to embed node name into file names for this log. Defaults
+  to `false`.
+
+```erlang
+{suffix, Str}
+```
+
+* Suffix to use for log file names, excluding the leading ".". Defaults to "audit".
+
+```erlang
+{dir, Path}.
+```
+
+* Directory in which log files should be located. See also `default_dir` application
+  option.
 
 ### User API
 
@@ -83,6 +149,13 @@ audit_log:clean_old(Log) -> ok | {error, _}.
 * Cleanup of logfiles. Provided for operator convenience as this is normally done
   automatically according to log options.
 
+```erlang
+audit_log:rediscover_logs() -> [{Log, Ret}].
+```
+
+* Ensure all currently known logs are up and running. `Ret` is the return value
+  of `audit_log:open_log/N`.
+
 ### Maintenance API
 
 ```erlang
@@ -123,7 +196,7 @@ audit_log_lib:printable_date(now() | datetime()) -> iolist().
 application:set_env(audit_log, default_dir, Dir).
 ```
 
-* Default target directory for new logs, defaults to "$ROOT/audit_logs/".
+* Default target directory for log files, defaults to "$ROOT/audit_logs/".
 
 ## HOWTO
 

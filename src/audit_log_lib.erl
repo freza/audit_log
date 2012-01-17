@@ -1,3 +1,4 @@
+%%% Copyright (c) 2012 Jachym Holecek <freza@circlewave.net>
 %%% Copyright (c) 2005-2011 Everything Everywhere Ltd.
 %%% All rights reserved.
 %%%
@@ -29,7 +30,7 @@
 -export([get_value/2, get_value/3]).
 -export([make_three/1, make_two/1]).
 -export([secs_to_midnight/0, secs_to_midnight/1]).
--export([printable_date/0, printable_date/1]).
+-export([printable_date/0, printable_date/1, plain_ts/0, plain_ts/1]).
 -export([get_env/3]).
 
 -include("audit_log_db.hrl").
@@ -69,6 +70,14 @@ secs_to_midnight() ->
 
 secs_to_midnight({_, {H, M, S}}) ->
     86400 - (H*3600 + M*60 + S).
+
+plain_ts() ->
+    plain_ts(erlang:localtime()).
+
+plain_ts({_, _, _} = Now) ->
+    plain_ts(calendar:now_to_local_time(Now));
+plain_ts({{YY, MM, DD}, {Hh, Mm, Ss}}) ->
+    [integer_to_list(YY), make_two(MM), make_two(DD), make_two(Hh), make_two(Mm), make_two(Ss)].
 
 printable_date() ->
     printable_date(now()).

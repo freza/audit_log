@@ -1,3 +1,4 @@
+%%% Copyright (c) 2012 Jachym Holecek <freza@circlewave.net>
 %%% Copyright (c) 2005-2011 Everything Everywhere Ltd.
 %%% All rights reserved.
 %%%
@@ -33,6 +34,7 @@
 
 -import(audit_log_lib, [get_value/3, make_two/1, secs_to_midnight/0]).
 -import(filename, [basename/1, dirname/1, rootname/2, absname/1, join/1, split/1]).
+-import(lists, [flatten/1]).
 
 -include("audit_log_db.hrl").
 
@@ -68,15 +70,15 @@ async_send_msg(Pid, Msg) ->
 	  iod, 			%% Open file. 				:: io_device()
 	  acc_size, 		%% Lines written so far. 		:: line_count()
 	  change_tmr, 		%% File change timer. 			:: timer_ref()
-	  change_ref, 		%% File change timer token. 		:: reference()
 	  clean_tmr, 		%% Old file cleanup timer. 		:: timer_ref()
-	  clean_ref, 		%% Old file cleanup timer token. 	:: reference()
 	  dir, 			%% Destination directory. 		:: filename()
 	  size_limit, 		%% Change after N entries. 		:: line_count() | infinity
 	  time_limit, 		%% Change after N hours. 		:: hours()
 	  lifetime, 		%% Remove old logs after N days. 	:: days()
 	  cache_size, 		%% Write buffer size. 			:: kilobytes()
-	  cache_time 		%% Write buffer timeout. 		:: msec()
+	  cache_time, 		%% Write buffer timeout. 		:: msec()
+	  with_node, 		%% Embed node name in file name. 	:: boolean()
+	  suffix 		%% Log file suffix. 			:: string()
 	 }).
 
 init([Log]) ->
@@ -84,12 +86,12 @@ init([Log]) ->
     process_flag(trap_exit, true),
     case configure(default(Log)) of
 	{#state{dir = Dir} = State, _} when is_list(Dir) ->
-	    State2 = #state{path = Path} = open(State),
-	    proc_lib:spawn_link(fun () -> clean_open(Log, dirname(Path), Path) end),
-	    Timer = schedule_clean_old(Ref = make_ref()),
-	    {ok, State2#state{clean_tmr = Timer, clean_ref = Ref}};
+	    #state{path = Path, dir = Dir} = State2 = open(State),
+	    Regexp = regexp(State2),
+	    proc_lib:spawn_link(fun () -> clean_open(Log, Dir, Regexp, Path) end),
+	    {ok, State2#state{clean_tmr = schedule_clean_old()}};
 	_ ->
-	    exit(no_directory)
+	    exit({bad_configuration, Log})
     end.
 
 handle_call({send_msg, Msg}, _, State) ->
@@ -112,9 +114,9 @@ handle_call(clean_old, _, #state{clean_tmr = Timer} = State) ->
 handle_call(_, _, State) ->
     {reply, {error, bad_request}, State}.
 
-handle_info({clean_old, CR}, #state{clean_ref = CR} = State) ->
+handle_info({timeout, CR, clean_old}, #state{clean_tmr = CR} = State) ->
     {noreply, cleanup(State)};
-handle_info({change, CR}, #state{change_ref = CR} = State) ->
+handle_info({timeout, CR, change}, #state{change_tmr = CR} = State) ->
     {noreply, change(State)};
 handle_info({'EXIT', _, Reason}, State) when Reason /= normal ->
     {stop, Reason, State};
@@ -127,6 +129,8 @@ handle_cast(_, State) ->
     {noreply, State}.
 
 code_change(_, State, _) ->
+    %% XXX We've change #state{} layout, should have upgrade code here when tagging next release!
+    %% XXX Also changed timer layout, handle that too.
     {ok, State}.
 
 terminate(_, State) ->
@@ -134,10 +138,10 @@ terminate(_, State) ->
 
 %%% Implementation.
 
-cleanup(#state{log = Log, path = Path, lifetime = LT} = State) ->
-    proc_lib:spawn_link(fun () -> clean_old(Log, dirname(Path), LT) end),
-    Timer = schedule_clean_old(Ref = make_ref()),
-    State#state{clean_tmr = Timer, clean_ref = Ref}.
+cleanup(#state{log = Log, lifetime = LT, dir = Dir} = State) ->
+    Regexp = regexp(State),
+    proc_lib:spawn_link(fun () -> clean_old(Log, Dir, Regexp, LT) end),
+    State#state{clean_tmr = schedule_clean_old()}.
 
 write(#state{iod = Iod, acc_size = Size} = State, Msg) ->
     case file:write(Iod, Msg) of
@@ -154,12 +158,11 @@ check(State) ->
 
 change(#state{change_tmr = Timer} = State) ->
     erlang:cancel_timer(Timer),
-    open(close(State#state{change_tmr = nil, change_ref = nil})).
+    open(close(State#state{change_tmr = nil})).
 
-open(#state{log = Log, dir = Dir, time_limit = TL, iod = nil, cache_size = CS, cache_time = CT} = S) ->
-    {ok, Iod} = file:open(Path = logfile(Log, Dir), cache_opts([raw, write, binary], CS, CT)),
-    Timer = schedule_file_change(TL, CR = make_ref()),
-    S#state{iod = Iod, path = Path, change_tmr = Timer, change_ref = CR}.
+open(#state{time_limit = TL, iod = nil, cache_size = CS, cache_time = CT} = State) ->
+    {ok, Iod} = file:open(Path = logfile(State), cache_opts([raw, write, binary], CS, CT)),
+    State#state{iod = Iod, path = Path, change_tmr = schedule_file_change(TL)}.
 
 cache_opts(Opts, CS, CT) when CS == 0; CT == 0 ->
     Opts;
@@ -190,25 +193,24 @@ close(#state{iod = Iod, path = Path, acc_size = Size} = State) ->
     end,
     State#state{iod = nil, path = nil, acc_size = 0}.
 
-clean_open(Log, Dir, Cur) ->
+clean_open(Log, Dir, Regexp, Cur) ->
     Strip = fun (F, N) when F /= Cur ->
-		    file:rename(F, rootname(F, ".audit.open")),
+		    file:rename(F, rootname(F, ".open")),
 		    N + 1;
 		(_, N) ->
 		    N
 	    end,
-    case filelib:fold_files(Dir, regexp(Log, ".audit.open"), false, Strip, 0) of
+    case filelib:fold_files(Dir, Regexp ++ ".open", false, Strip, 0) of
 	0 ->
 	    ok;
 	N ->
 	    error_logger:info_msg("[Audit Log] Cleaned up ~d open files for ~s.", [N, Log])
     end.
 
-clean_old(Log, Dir, Limit) ->
+clean_old(Log, Dir, Regexp, Limit) ->
     LT = erlang:localtime(),
     Clean = fun (F, N) ->
-		    DT = filedate(basename(F) -- log_to_list(Log) -- "_"),
-		    case calendar:time_difference(DT, LT) of
+		    case calendar:time_difference(file_date(basename(F)), LT) of
 			{D, _} when D >= Limit ->
 			    ok = file:delete(F),
 			    N + 1;
@@ -216,7 +218,7 @@ clean_old(Log, Dir, Limit) ->
 			    N
 		    end
 	    end,
-    case filelib:fold_files(Dir, regexp(Log, ".audit"), false, Clean, 0) of
+    case filelib:fold_files(Dir, Regexp, false, Clean, 0) of
 	0 ->
 	    ok;
 	N ->
@@ -226,39 +228,80 @@ clean_old(Log, Dir, Limit) ->
 %%% Utilities.
 
 default(Log) ->
-    #state{log = Log, path = nil, iod = nil, change_tmr = nil, acc_size = 0, dir = nil}.
+    #state{log = Log, path = nil, iod = nil, change_tmr = nil, clean_tmr = nil, acc_size = 0, dir = nil}.
 
 configure(#state{log = Log, cache_size = CS0, cache_time = CT0, size_limit = SL0, time_limit = TL0, dir = LD0,
-		 lifetime = LT0} = State) ->
+		 lifetime = LT0, with_node = WN0, suffix = SU0} = State) ->
     [#audit_log_conf{opts = Opts}] = mnesia:dirty_read(audit_log_conf, Log),
     CS = get_value(cache_size, Opts, CS0),
     CT = get_value(cache_time, Opts, CT0),
     SL = get_value(size_limit, Opts, SL0),
     TL = get_value(time_limit, Opts, TL0),
     LT = get_value(lifetime, Opts, LT0),
+    WN = get_value(with_node, Opts, WN0),
+    SU = get_value(suffix, Opts, SU0),
     LD = get_value(dir, Opts, LD0),
-    Change = (SL /= SL0) or (TL /= TL0),
+    Change = (SL /= SL0) or (TL /= TL0) or (WN /= WN0) or (SU /= SU0),
     State2 = State#state{cache_size = CS, cache_time = CT, size_limit = SL, time_limit = TL,
-			 lifetime = LT, dir = absname(LD)},
+			 lifetime = LT, with_node = WN, suffix = SU, dir = absname(LD)},
     {State2, Change}.
 
-logfile(Log, Dir) ->
-    logfile(Log, Dir, nil).
+logfile(#state{dir = Dir, log = Log, with_node = With_node, suffix = Suf}) ->
+    logfile(Dir, Log, With_node, Suf, nil).
 
-logfile(Log, Dir, N) ->
-    Timestamp = file_ts(erlang:localtime()),
+logfile(Dir, Log, With_node, Suf, N) ->
+    Timestamp = audit_log_lib:plain_ts(erlang:localtime()),
     if is_atom(N) ->
 	    Seq = "";
        true ->
-	    Seq = [".", make_two(N)]
+	    Seq = [$., make_two(N)]
     end,
-    mkdir(dirname(Path = join([Dir, [log_to_list(Log), "_", Timestamp, Seq, ".audit"]]))),
+    case With_node of
+	true ->
+	    File = [atom_to_list(Log), $_, node_to_list(), $_, Timestamp, Seq, file_suf(Suf)];
+	_ ->
+	    File = [atom_to_list(Log), $_, Timestamp, Seq, file_suf(Suf)]
+    end,
+    mkdir(dirname(Path = join([Dir, File]))),
     case filelib:is_file(Path) of
 	true ->
-	    logfile(Log, Dir, if is_atom(N) -> 1; true -> N + 1 end);
+	    logfile(Dir, Log, With_node, Suf, if is_atom(N) -> 1; true -> N + 1 end);
 	_ ->
 	    Path ++ ".open"
     end.
+
+regexp(#state{log = Log, with_node = With_node, suffix = Suf}) ->
+    flatten([atom_to_list(Log),
+	     case With_node of
+		 true ->
+		     [$_, node_to_list(), $_];
+		 _ ->
+		     [$_]
+	     end,
+	     "[0-9]{14}([.][0-9][0-9])?", file_suf(Suf)]).
+
+file_date(Basename) ->
+    {match, [TS]} = re:run(Basename, ".*_(?<TS>[0-9]{14})([.]|$)", [{capture, ['TS'], binary}]),
+    <<Y1, Y2, Y3, Y4, M1, M2, D1, D2, H1, H2, M3, M4, S1, S2>> = TS,
+    {{dec(Y1, Y2, Y3, Y4), dec(M1, M2), dec(D1, D2)}, {dec(H1, H2), dec(M3, M4), dec(S1, S2)}}.
+
+dec(N1, N2, N3, N4) ->
+    (dig(N1) * 1000) + (dig(N2) * 100) + (dig(N3) * 10) + dig(N4).
+
+dec(N1, N2) ->
+    (dig(N1) * 10) + dig(N2).
+
+dig(N) when is_integer(N), N >= $0, N =< $9 ->
+    N - $0.
+
+node_to_list() ->
+    [App, Node] = string:tokens(atom_to_list(node()), "@"),
+    [App, $_, Node].
+
+file_suf("") ->
+    [];
+file_suf(Suf) ->
+    [$., Suf].
 
 mkdir(Path) ->
     mkdir(split(Path), []).
@@ -268,17 +311,22 @@ mkdir([Dir | Tail], Parent) ->
 	ok ->
 	    ok;
 	{error, eexist} ->
-	    ok
+	    ok;
+	{error, eisdir} ->
+	    %% Reported on MacOS X 10.6.8 on file:make_dir("/").
+	    ok;
+	{error, Rsn} ->
+	    exit({mkdir_failed, Rsn, Dir})
     end,
     mkdir(Tail, Path);
 mkdir([], _) ->
     ok.
 
-schedule_clean_old(Ref) ->
-    erlang:send_after(1000 * secs_to_midnight(), self(), {clean_old, Ref}).
+schedule_clean_old() ->
+    erlang:start_timer(1000 * secs_to_midnight(), self(), clean_old).
 
-schedule_file_change(Hours, Ref) ->
-    erlang:send_after(interval(erlang:now(), Hours), self(), {change, Ref}).
+schedule_file_change(Hours) ->
+    erlang:start_timer(interval(erlang:now(), Hours), self(), change).
 
 interval(Now, Hours) when is_integer(Hours), Hours > 0 ->
     T1 = calendar:now_to_local_time(Now),
@@ -294,29 +342,3 @@ round({Date, {_, _, _}}, Hours) when (Hours rem 24) == 0 ->
     {Date, {0, 0, 0}};
 round({Date, {H, _, _}}, _) ->
     {Date, {H, 0, 0}}.
-
-file_ts({{YY, MM, DD}, {Hh, Mm, Ss}}) ->
-    [integer_to_list(YY), make_two(MM), make_two(DD), make_two(Hh), make_two(Mm), make_two(Ss)].
-
-regexp(Log, Suf) ->
-    [log_to_list(Log), $_,
-     "[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]",
-     ".[0-9][0-9]" | Suf].
-
-log_to_list(syslog) ->
-    [App, Node] = string:tokens(atom_to_list(node()), "@"),
-    "syslog_" ++ App ++ "_" ++ Node;
-log_to_list(Log) ->
-    atom_to_list(Log).
-
-filedate([Y1, Y2, Y3, Y4, $-, M1, M2, $-, D1, D2, $_, H1, H2, $-, M3, M4, $-, S1, S2 | _]) ->
-    {{dec(Y1, Y2, Y3, Y4), dec(M1, M2), dec(D1, D2)}, {dec(H1, H2), dec(M3, M4), dec(S1, S2)}}.
-
-dec(N1, N2, N3, N4) ->
-    (dig(N1) * 1000) + (dig(N2) * 100) + (dig(N3) * 10) + dig(N4).
-
-dec(N1, N2) ->
-    (dig(N1) * 10) + dig(N2).
-
-dig(N) when is_integer(N), N >= $0, N =< $9 ->
-    N - $0.

@@ -1,3 +1,4 @@
+%%% Copyright (c) 2012 Jachym Holecek <freza@circlewave.net>
 %%% Copyright (c) 2005-2011 Everything Everywhere Ltd.
 %%% All rights reserved.
 %%%
@@ -37,7 +38,7 @@
 
 start(normal, _) ->
     setup_db(),
-    {ok, _} = audit_log:open_log(syslog),
+    {ok, _} = audit_log:open_log(syslog, [{with_node, true}]),
     audit_log_sup:start_link().
 
 stop(_) ->
