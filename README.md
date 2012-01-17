@@ -27,9 +27,7 @@ Lightweight audit logging library.
 * Automatic cleanup of old logfiles.
 * All options configurable per log.
 
-## Public interface
-
-### Type definitions
+## Type definitions
 
 ```erlang
 Args         = [term()].
@@ -49,7 +47,7 @@ Opt          = {cache_size, KB}
              | {dir, Path}.
 ```
 
-### Log Options
+## Log Options
 
 ```erlang
 {cache_size, KB}
@@ -107,6 +105,8 @@ Opt          = {cache_size, KB}
 
 * Directory in which log files should be located. See also `default_dir` application
   option.
+
+## Public API
 
 ### User API
 
