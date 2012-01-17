@@ -313,7 +313,7 @@ mkdir([Dir | Tail], Parent) ->
 	{error, eexist} ->
 	    ok;
 	{error, eisdir} ->
-	    %% Reported on MacOS X 10.6.8 on file:make_dir("/").
+	    %% Reported on MacOS X 10.6.8 with file:make_dir("/").
 	    ok;
 	{error, Rsn} ->
 	    exit({mkdir_failed, Rsn, Dir})
