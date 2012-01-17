@@ -41,12 +41,12 @@ Stat         = {Items_written, Cur_file}.
 Opts         = [Opt]
 Opt          = {cache_size, KB}
              | {cache_time, MS}
-	     | {size_limit, NN}
-	     | {time_limit, HH}
-	     | {lifetime, DD}
-	     | {with_node, Flag}
-	     | {suffix, Str}
-	     | {dir, Path}.
+             | {size_limit, NN}
+             | {time_limit, HH}
+             | {lifetime, DD}
+             | {with_node, Flag}
+             | {suffix, Str}
+             | {dir, Path}.
 ```
 
 ### Log Options
