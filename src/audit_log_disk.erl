@@ -30,7 +30,6 @@
 
 -export([start_link/1, send_msg/2, set_options/1, get_status/1, change_file/1, clean_old/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
--export([async_send_msg/2]).
 
 -import(audit_log_lib, [get_value/3, make_two/1, secs_to_midnight/0]).
 -import(filename, [basename/1, dirname/1, rootname/2, absname/1, join/1, split/1]).
@@ -58,9 +57,6 @@ change_file(Pid) ->
 
 clean_old(Pid) ->
     gen_server:call(Pid, clean_old).
-
-async_send_msg(Pid, Msg) ->
-    gen_server:cast(Pid, {send_msg, Msg}).
 
 %%% Generic server.
 
@@ -123,8 +119,6 @@ handle_info({'EXIT', _, Reason}, State) when Reason /= normal ->
 handle_info(_, State) ->
     {noreply, State}.
 
-handle_cast({send_msg, Msg}, State) ->
-    {noreply, write(State, Msg)};
 handle_cast(_, State) ->
     {noreply, State}.
 

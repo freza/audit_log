@@ -15,7 +15,7 @@ Lightweight audit logging library.
 ## History
 
 * 2005-2010 Chandrashekhar Mullaparthi
-* 2010-2011 Jachym Holecek
+* 2010-2012 Jachym Holecek
 
 ## Features
 
@@ -150,11 +150,15 @@ audit_log:clean_old(Log) -> ok | {error, _}.
   automatically according to log options.
 
 ```erlang
-audit_log:rediscover_logs() -> [{Log, Ret}].
+audit_log:rediscover_logs() -> ok.
+audit_log:rediscover_logs(App) -> ok.
 ```
 
-* Ensure all currently known logs are up and running. `Ret` is the return value
-  of `audit_log:open_log/N`.
+* Ensure all logs are up and running, either for given application or for all loaded
+  applications. List of logs and default options are read from `audit_log` key in
+  application resource file (`*.app`) ensuring all logs are loaded in configuration
+  table. Subsequently it is ensured worker processes are running for all entries in
+  that table.
 
 ### Maintenance API
 
@@ -186,7 +190,9 @@ audit_log:create_db(Mnesia_opts) -> Mnesia_ret.
 
 * This can be used to manually create configuration table in cases where default
   table options aren't desirable. Should be called before `audit_log` is first
-  started.
+  started. By default configuration table is set up at application startup
+  ensuring disc copies replica exists on current node and with `local_content`
+  flag set.
 
 ### Utility API
 

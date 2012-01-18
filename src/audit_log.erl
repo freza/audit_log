@@ -29,11 +29,11 @@
 
 -export([open_log/1, open_log/2, audit_msg/2, audit_msg/3, syslog_msg/1, syslog_msg/2, close_log/1]).
 -export([get_config/0, get_config/1, set_config/1, set_config/2, get_status/0, get_status/1]).
--export([change_file/1, clean_old/1, rediscover_logs/0]).
+-export([change_file/1, clean_old/1, rediscover_logs/0, rediscover_logs/1]).
 -export([create_db/0, create_db/1]).
 
 -import(audit_log_lib, [get_env/3]).
--import(lists, [foreach/2, keysort/2]).
+-import(lists, [keysort/2]).
 
 -include("audit_log_db.hrl").
 
@@ -57,18 +57,8 @@ open_log(Log) ->
     open_log(Log, []).
 
 open_log(Log, Opts) ->
-    mnesia:activity(transaction, fun () -> do_set_config(Log, Opts) end),
-    try audit_log_sup:add_worker(Log) of
-	{ok, _} ->
-	    {ok, started};
-	{error, {already_started, _}} ->
-	    {ok, running};
-	{error, _} = Err ->
-	    Err
-    catch
-	exit : {noproc, _} ->
-	    {ok, added}
-    end.
+    mnesia:activity(transaction, fun () -> edit_log(Log, Opts, false) end),
+    start_log(Log).
 
 close_log(Log) ->
     try audit_log_sup:del_worker(Log) catch
@@ -84,30 +74,37 @@ clean_old(Log) ->
     audit_log_disk:clean_old(Log).
 
 rediscover_logs() ->
-    %% Applications can use this to ensure all logs are usable.
-    [{Log, open_log(Log)} || Log <- mnesia:dirty_all_keys(audit_log_conf)].
+    mnesia:activity(transaction, fun () -> scan_all_specs() end),
+    [start_log(Log) || Log <- mnesia:dirty_all_keys(audit_log_conf)],
+    ok.
+
+rediscover_logs(App) ->
+    mnesia:activity(transaction, fun () -> scan_app_specs(App) end),
+    [start_log(Log) || Log <- mnesia:dirty_all_keys(audit_log_conf)],
+    ok.
 
 %%% Maintenance API.
 
 get_config() ->
     Read = fun () ->
-		   [{Log, do_get_config(Log)} || Log <- mnesia:all_keys(audit_log_conf)]
+		   [{Log, edit_log(Log, [], false)} || Log <- mnesia:all_keys(audit_log_conf)]
 	   end,
     keysort(1, mnesia:activity(transaction, Read)).
 
 get_config(Log) ->
-    mnesia:activity(transaction, fun () -> do_get_config(Log) end).
+    mnesia:activity(transaction, fun () -> edit_log(Log, [], false) end).
 
 set_config(Opts) ->
     Edit = fun () ->
-		   foreach(fun (Log) -> do_set_config(Log, Opts) end, All = mnesia:all_keys(audit_log_conf)),
-		   All
+		   All_logs = mnesia:all_keys(audit_log_conf),
+		   [edit_log(Log, Opts, true) || Log <- All_logs],
+		   All_logs
 	   end,
     [(catch audit_log_disk:set_options(Log)) || Log <- mnesia:activity(transaction, Edit)],
     ok.
 
 set_config(Log, Opts) ->
-    mnesia:activity(transaction, fun () -> do_set_config(Log, Opts) end),
+    mnesia:activity(transaction, fun () -> edit_log(Log, Opts, true) end),
     audit_log_disk:set_options(Log).
 
 get_status() ->
@@ -132,13 +129,43 @@ create_db(Opts) ->
 
 %%% Utilities.
 
-do_get_config(Log) ->
-    [#audit_log_conf{opts = Opts}] = mnesia:read(audit_log_conf, Log),
-    Opts.
+%% Attempt to start log process for some log.
+start_log(Log) ->
+    try audit_log_sup:add_worker(Log) of
+	{ok, _} ->
+	    {ok, started};
+	{error, {already_started, _}} ->
+	    {ok, running};
+	{error, _} = Err ->
+	    Err
+    catch
+	exit : {noproc, _} ->
+	    {ok, added}
+    end.
 
-do_set_config(Log, Opts) ->
+%% Ensure all logs mentioned in *.app files of loaded applications are provisioned in Mnesia.
+scan_all_specs() ->
+    [scan_app_specs(App) || {App, _, _} <- application:loaded_applications()],
+    ok.
+
+scan_app_specs(App) ->
+    [edit_log(Log, Opts, false) || {Log, Opts} <- get_key(App, audit_log, [])],
+    ok.
+
+get_key(App, Key, Def) ->
+    case application:get_key(App, Key) of
+	{ok, Val} ->
+	    Val;
+	undefined ->
+	    Def
+    end.
+
+%% NB `edit_log(Log, [], false)` can be used to just fetch log options.
+edit_log(Log, Opts, Do_force) ->
     case mnesia:read(audit_log_conf, Log) of
-	[#audit_log_conf{opts = Prev} = CF] ->
+	[#audit_log_conf{opts = Os}] when Do_force == false ->
+	    Os;
+	[#audit_log_conf{opts = Prev} = CF] when Do_force == true ->
 	    mnesia:write(CF#audit_log_conf{log = Log, opts = Os = merge_opts(Opts, Prev)}),
 	    Os;
 	[] ->
