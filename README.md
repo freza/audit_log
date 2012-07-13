@@ -19,13 +19,15 @@ Lightweight audit logging library.
 
 ## Features
 
-* Persistent logs (automatically opened on startup).
+* Persistent logs, automatically opened on startup.
 * Log messages treated as opaque data.
 * Synchronous interface.
 * Good throughput.
 * Automatic file change when size or age limit reached.
 * Automatic cleanup of old logfiles.
 * All options configurable per log.
+* User controls tradeoff between write latency and reliability.
+* Filename disambiguates completed logs from currently open ones.
 
 ## Type definitions
 
@@ -218,8 +220,8 @@ application:set_env(audit_log, default_dir, Dir).
 * Obtain and compile:
 
 ```sh
-$ git clone git://github.com/eeltd/audit_log.git
-$ cd audit_log.git
+$ git clone git://github.com/freza/audit_log.git
+$ cd audit_log
 $ ./rebar clean && ./rebar compile && ./rebar xref
 ```
 
@@ -227,7 +229,7 @@ $ ./rebar clean && ./rebar compile && ./rebar xref
 
 ```sh
 $ cd /tmp
-$ erl -pa /where/ever/audit_log.git/ebin -boot start_sasl -sname foo -audit_log default_dir '"/tmp/audit_logs"'
+$ erl -pa /where/ever/audit_log/ebin -boot start_sasl -sname foo -audit_log default_dir '"/tmp/audit_logs"'
 [...]
 (foo@bar)1> mnesia:create_schema([node()]).
 [...]
