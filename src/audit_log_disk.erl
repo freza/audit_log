@@ -320,19 +320,10 @@ schedule_clean_old() ->
     erlang:start_timer(1000 * secs_to_midnight(), self(), clean_old).
 
 schedule_file_change(Hours) ->
-    erlang:start_timer(interval(erlang:now(), Hours), self(), change).
+    erlang:start_timer(change_after_msecs(Hours), self(), change).
 
-interval(Now, Hours) when is_integer(Hours), Hours > 0 ->
-    T1 = calendar:now_to_local_time(Now),
-    T3 = round(calendar:now_to_local_time(increment(Now, Hours)), Hours),
-    {D, {H, M, S}} = calendar:time_difference(T1, T3),
-    ((D * 86400) + (H * 3600) + (M * 60) + S) * 1000.
-
-increment({MS, S, _}, Hours) ->
-    Seconds = S + (Hours * 3600),
-    {MS + (Seconds div 1000000), (Seconds rem 1000000), 0}.
-
-round({Date, {_, _, _}}, Hours) when (Hours rem 24) == 0 ->
-    {Date, {0, 0, 0}};
-round({Date, {H, _, _}}, _) ->
-    {Date, {H, 0, 0}}.
+change_after_msecs(Hours) ->
+    %% NB: Scheduling against universal time (not local time) for DST safety.
+    GS = calendar:datetime_to_gregorian_seconds(calendar:universal_time()),
+    AS = (Hours * 3600),
+    (((GS + AS) div AS)*AS - GS)*1000.
