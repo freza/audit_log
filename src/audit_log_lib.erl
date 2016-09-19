@@ -80,7 +80,7 @@ plain_ts({{YY, MM, DD}, {Hh, Mm, Ss}}) ->
     [integer_to_list(YY), make_two(MM), make_two(DD), make_two(Hh), make_two(Mm), make_two(Ss)].
 
 printable_date() ->
-    printable_date(now()).
+    printable_date(os:timestamp()).
 
 printable_date({_, _, MicroSecs} = Now) ->
     [printable_date(calendar:now_to_local_time(Now)), $., make_three(MicroSecs div 1000)];
